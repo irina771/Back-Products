@@ -1,25 +1,62 @@
-const axios = require("axios");
-const fs = require('fs');
-const path = require('path');
 const { Router } = require("express");
 const router = Router();
-const { Users, Products } = require("../db");
+const { Products } = require("../db");
+const fs = require('fs');
+const path = require('path');
 
+const jsonFilePath = path.join(__dirname, './Data.json');
+
+async function loadProductsFromJSON() {
+    try {
+        // Leer el archivo JSON
+        const data = fs.readFileSync(jsonFilePath, 'utf-8');
+
+        // Parsear el contenido del archivo JSON
+        const products = JSON.parse(data);
+
+        // Insertar cada producto en la base de datos
+        const createdProducts = await Promise.all(products.map(async (product) => {
+            try {
+                return await Products.create(product);
+            } catch (error) {
+                console.error('Error al insertar producto:', error);
+            }
+        }));
+
+        console.log('Los productos se han cargado correctamente en la base de datos.');
+        
+        return createdProducts;
+    } catch (error) {
+        console.error('Error al cargar los productos desde el archivo JSON:', error);
+        throw new Error('Hubo un problema al cargar los productos desde el archivo JSON');
+    }
+}
+
+router.use(async (req, res, next) => {
+    try {
+        const productsCount = await Products.count();
+
+        // Si la base de datos está vacía, cargar los productos desde el archivo JSON
+        if (productsCount === 0) {
+            await loadProductsFromJSON();
+        }
+        
+        next();
+    } catch (error) {
+        console.error('Error al verificar si la base de datos está vacía:', error);
+        res.status(500).json({ error: 'Hubo un problema al verificar si la base de datos está vacía' });
+    }
+});
 
 router.get("/", async (req, res) => {
     try {
-        // Leer el archivo JSON
-        const jsonData = fs.readFileSync(path.resolve(__dirname, "../Data.json"), 'utf-8');
-        const productsData = JSON.parse(jsonData);
+        const products = await Products.findAll();
 
-        // Insertar datos en la base de datos
-        await Products.bulkCreate(productsData);
+        if (products.length === 0) {
+            return res.status(404).json({ error: 'No se encontraron productos' });
+        }
 
-        // Obtener todos los productos después de la inserción
-        const allProducts = await Products.findAll();
-        
-        console.log(allProducts);
-        res.json(allProducts);
+        res.json(products);
     } catch (error) {
         console.error('Error al obtener o insertar los productos:', error);
         res.status(500).json({ error: 'Hubo un problema al obtener o insertar los productos' });
@@ -27,36 +64,49 @@ router.get("/", async (req, res) => {
 });
 
 
-// const products = [
-//     {
-//       "Handle": "cola-glitter-23-grs",
-//       "Title": "COLA GLITTER 23 GRS",
-//       "Description": "<p><strong>Características:</strong></p> <ul> <li>Para hacer pegaduras, contornos, decorar y pintar sobre papel, papel cartón y cartulina.</li> <li>Posee un brillo intenso con glitter.</li> <li>Lavable (no mancha las ropas).</li> </ul>",
-//       "SKU": 60870131001,
-//       "Grams": 100,
-//       "Stock": 1013,
-//       "Price": 1161,
-//       "ComparePrice": 1290,
-//       "Barcode": 7891153003689
-//     },
-//     // Agrega aquí los demás productos
-//   ];
-  
-//   axios.post('http://localhost:3001/products/createProduct', products)
-//     .then(response => {
-//       console.log('Productos creados:', response.data);
-//     })
-//     .catch(error => {
-//       console.error('Error al crear productos:', error);
-//     });
-
 router.post('/createProduct', async (req, res) => {
     try {
-        // Obtener los datos del nuevo producto del cuerpo de la solicitud
-        let { Handle, Title, Description, SKU, Grams, Stock, Price, ComparePrice, Barcode } = req.body;
+        if (!Array.isArray(req.body)) {
+            // Si solo se envía un objeto JSON, crear un solo producto
+            let { Handle, Title, Description, SKU, Grams, Stock, Price, ComparePrice, Barcode } = req.body;
+            let newProduct = await Products.create({
+                Handle,
+                Title,
+                Description,
+                SKU,
+                Grams,
+                Stock,
+                Price,
+                ComparePrice,
+                Barcode
+            });
+            return res.status(201).json(newProduct);
+        } else {
+            // Si se envía un array de objetos JSON, crear varios productos
+            const createdProducts = await Promise.all(req.body.map(async (product) => {
+                return await Products.create(product);
+            }));
+            // Enviar los nuevos productos creados como respuesta
+            res.status(201).json(createdProducts);
+        }
+    } catch (error) {
+        console.error('Error al crear el producto:', error);
+        res.status(500).json({ error: 'Hubo un problema al crear el producto' });
+    }
+});
 
-        // Crear un nuevo registro de producto en la base de datos
-        let newProduct = await Products.create({
+router.put('/update/:id', async (req, res) => {
+    try {
+        const productId = req.params.id; 
+        const { Handle, Title, Description, SKU, Grams, Stock, Price, ComparePrice, Barcode } = req.body;
+     
+        const product = await Products.findByPk(productId);
+
+        if (!product) {
+            return res.status(404).json({ error: 'El producto no fue encontrado' });
+        }
+        
+        await product.update({
             Handle,
             Title,
             Description,
@@ -67,21 +117,32 @@ router.post('/createProduct', async (req, res) => {
             ComparePrice,
             Barcode
         });
-console.log(newProduct)
-        // Enviar el nuevo producto creado como respuesta
-        res.status(201).json(newProduct);
+ 
+        res.status(200).json(product);
     } catch (error) {
-        console.error('Error al crear el producto:', error);
-        res.status(500).json({ error: 'Hubo un problema al crear el producto' });
+        console.error('Error al actualizar el producto:', error);
+        res.status(500).json({ error: 'Hubo un problema al actualizar el producto' });
     }
 });
 
-// router.put('/update/:id', (req,res) => {
 
-// })
+router.delete('/delete/:id', async (req, res) => {
+    try {
+        const productId = req.params.id; 
+        const product = await Products.findByPk(productId);
 
-// router.delete('/delete/:id', (req,res) => {
+        if (!product) {
+            return res.status(404).json({ error: 'El producto no fue encontrado' });
+        }
+        
+        await product.destroy();
 
-// })
+        res.status(200).json({ message: 'El producto fue eliminado exitosamente' });
+    } catch (error) {
+        console.error('Error al eliminar el producto:', error);
+        res.status(500).json({ error: 'Hubo un problema al eliminar el producto' });
+    }
+});
+
 
 module.exports = router;
