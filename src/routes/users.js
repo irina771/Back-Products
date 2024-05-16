@@ -14,20 +14,43 @@ const app = express();
 // Permitir todas las solicitudes CORS
 app.use(cors());
 
+// Ruta para el registro de usuarios
+
+router.post('/register', async (req, res) => {
+    const { user, password, email } = req.body; // Incluye el campo 'email' en la desestructuración de req.body
+
+    try {
+        // Verificar si el usuario ya existe en la base de datos
+        const existingUser = await Users.findOne({ where: { user } });
+        if (existingUser) {
+            return res.status(400).json({ error: 'El usuario ya existe' });
+        }
+
+        // Crear un nuevo usuario en la base de datos
+        const hashedPassword = await bcrypt.hash(password, 10); 
+        const newUser = await Users.create({ user, password: hashedPassword, email }); // Incluye el campo 'email'
+
+        res.status(201).json({ message: 'Usuario creado exitosamente' });
+    } catch (error) {
+        console.error('Error al registrar usuario:', error);
+        res.status(500).json({ error: 'Error interno del servidor' });
+    }
+});
+
 // Ruta para el inicio de sesión
 router.post('/login', async (req, res) => {
-    const { username, password } = req.body;
+    const { user, password } = req.body;
 
     // Buscar el usuario en la base de datos por su nombre de usuario
-    const user = await Users.findOne({ where: { username } });
+    const username = await Users.findOne({ where: { user } });
 
     // Verificar si el usuario existe y si la contraseña coincide
-    if (!user || !bcrypt.compareSync(password, user.password)) {
+    if (!username || !bcrypt.compareSync(password, username.password)) {
         return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
     // Generar un token JWT
-    const token = jwt.sign({ userId: user.id }, secretKey, { expiresIn: '1h' });
+    const token = jwt.sign({ userId: username.id }, secretKey, { expiresIn: '1h' });
 
     // Enviar el token JWT como respuesta
     res.status(200).json({ token });
